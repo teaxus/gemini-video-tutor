@@ -10,6 +10,9 @@ output/
 *.converted.mp4
 *.compressed.mp4
 
+# ── 多轮追问会话状态（含对话内容与本地视频路径）──
+sessions/
+
 # ── 系统 / 缓存文件 ──
 .DS_Store
 __pycache__/

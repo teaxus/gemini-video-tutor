@@ -67,6 +67,18 @@ DEFAULT_CONTINUATION = """\
 4. 如果这是最后一段，在末尾补齐覆盖全片的汇总部分
 5. 参考画面 screenshot_MM_SS.jpg 中的 MM_SS 也必须是原始视频的绝对时间"""
 
+# Appended to the profile prompt in --parallel-chunks mode, where each chunk is
+# analyzed independently (no accumulated context from earlier chunks).
+PARALLEL_CHUNK_NOTE = """
+
+# 分段说明（重要）
+这是同一个长视频的第 {chunk_index}/{total_chunks} 段，对应原始视频 {start_time} - {end_time}。
+本段是独立分析的（看不到其它段），请：
+1. 所有时间戳必须换算为原始视频的绝对时间：本段内部 00:00 = 原始视频 {start_time}
+2. 参考画面 screenshot_MM_SS.jpg 中的 MM_SS 同样必须是原始视频的绝对时间
+3. 只输出本段内容对应的文档片段；不要写覆盖全片的总标题、前言或总结
+4. 如有编号（如步骤），用「{start_time} 起的步骤」这类基于时间的小节标题，不要用全局编号"""
+
 # Container -> mime for formats Gemini accepts directly. Others are converted.
 GEMINI_VIDEO_MIME = {
     ".mp4": "video/mp4",
@@ -534,6 +546,17 @@ def analyze_video(client: GeminiClient, video_path: str, profile: Profile, cfg: 
         total_chunks = len(chunks)
         print(f"  Split into {total_chunks} chunks", file=sys.stderr)
 
+        if cfg.parallel_chunks and total_chunks > 1:
+            accumulated_doc, failed_count = _analyze_chunks_parallel(
+                client, chunks, profile, cfg)
+            if failed_count > 0:
+                print(f"  ⚠️  {failed_count}/{total_chunks} chunks failed. "
+                      f"Use --resume to retry.", file=sys.stderr)
+            print("Extracting referenced keyframes...", file=sys.stderr)
+            frames = extract_referenced_keyframes(video_path, accumulated_doc, output_dir)
+            print(f"  Saved {len(frames)} keyframes to {output_dir}", file=sys.stderr)
+            return post_process_document(accumulated_doc, output_dir)
+
         accumulated_doc = ""
         failed_count = 0
 
@@ -577,6 +600,50 @@ def analyze_video(client: GeminiClient, video_path: str, profile: Profile, cfg: 
         print(f"  Saved {len(frames)} keyframes to {output_dir}", file=sys.stderr)
 
         return post_process_document(accumulated_doc, output_dir)
+
+
+def _analyze_chunks_parallel(client: GeminiClient, chunks: list, profile: Profile,
+                             cfg: Config):
+    """Analyze all chunks concurrently, each with an independent prompt.
+
+    Trades cross-chunk coherence (numbering continuity, dedup of recap sections)
+    for wall-clock speed — chunk N never sees chunk N-1's output. Failed chunks
+    get the same CHUNK_FAILED marker, so --resume works on the result.
+    Returns (merged_doc, failed_count).
+    """
+    total_chunks = len(chunks)
+    print(f"  Parallel mode: {total_chunks} chunks x {cfg.workers} workers "
+          f"(independent prompts, no cross-chunk context)", file=sys.stderr)
+
+    results = [None] * total_chunks
+
+    def run_chunk(i: int, start: float, end: float, chunk_path: str) -> str:
+        start_str, end_str = format_time(start), format_time(end)
+        chunk_prompt = profile.prompt + PARALLEL_CHUNK_NOTE.format(
+            chunk_index=i + 1, total_chunks=total_chunks,
+            start_time=start_str, end_time=end_str)
+        print(f"  Chunk {i + 1}/{total_chunks} ({start_str} - {end_str}) started...",
+              file=sys.stderr)
+        return analyze_single(client, chunk_path, chunk_prompt, profile.system)
+
+    failed_count = 0
+    with ThreadPoolExecutor(max_workers=max(1, cfg.workers)) as executor:
+        futures = {executor.submit(run_chunk, i, s, e, p): i
+                   for i, (s, e, p) in enumerate(chunks)}
+        for future in as_completed(futures):
+            i = futures[future]
+            start_str, end_str = format_time(chunks[i][0]), format_time(chunks[i][1])
+            try:
+                results[i] = future.result()
+                print(f"  ✅ Chunk {i + 1}/{total_chunks} done", file=sys.stderr)
+            except Exception as e:
+                print(f"  ❌ Chunk {i + 1} failed: {e}", file=sys.stderr)
+                results[i] = (
+                    f"<!-- CHUNK_FAILED {i + 1} {start_str} {end_str} -->\n"
+                    f"> ⚠️ **Chunk {i + 1} ({start_str} - {end_str}) 处理失败：** {e}\n")
+                failed_count += 1
+
+    return "\n\n".join(r.rstrip() for r in results), failed_count
 
 
 # ─── Resume Support ──────────────────────────────────────────────────────────
@@ -880,6 +947,9 @@ Examples:
                         help="Max minutes per chunk (overrides config)")
     parser.add_argument("--no-chunk", action="store_true",
                         help="Disable auto-chunking (send full video regardless of length)")
+    parser.add_argument("--parallel-chunks", action="store_true", default=None,
+                        help="Analyze chunks of one long video concurrently (faster, "
+                             "but chunks lose cross-chunk context; numbering restarts per chunk)")
     parser.add_argument("--keyframe-dir", default=None,
                         help="Directory to save keyframe screenshots (default: <output>_frames/)")
     parser.add_argument("--keyframe-interval", type=int, default=None,

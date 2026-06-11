@@ -4,9 +4,10 @@
 
 - ✅ 整段视频直传 Gemini（File API，最大 ~2GB），原生 1FPS 采样 + 音频分析
 - ✅ 每条结论带依据：时间戳 `[MM:SS]` + 关键画面 `[screenshot_MM_SS.jpg]`，自动抽帧嵌图
-- ✅ 长视频自动分段，顺序携带前文上下文，保证连贯
+- ✅ 长视频自动分段，顺序携带前文上下文，保证连贯（赶时间可 `--parallel-chunks` 分段并行）
 - ✅ 分段失败 `--resume` 断点续传，文档本身即状态，无需额外状态文件
 - ✅ 批量并发处理
+- ✅ **多轮来回深度追问**（`ask.py`）：视频上传一次（File API ~48h），对话历史持久化，连续追问不重新上传、不重新分析
 - ✅ 分析方法（提示词）外置成文件，改完即时生效，无需重启
 - ✅ 跨通用 agent（Claude Code / Codex / openclaw 等）：零强制依赖，PyYAML 可选，认证自动适配官方/代理
 
@@ -61,8 +62,36 @@ python3 scripts/analyze.py "/path/to/video.mp4" -o tutorial.md
 | 临时提示词 | `analyze.py v.mp4 --prompt "只提取所有命令行命令" -o cmds.md` |
 | 断点续传 | `analyze.py --resume out.md` |
 | 批量并发 | `analyze.py --batch ./videos/ --output-dir ./out/ --workers 3` |
+| 长视频分段并行 | `analyze.py long.mp4 --parallel-chunks --workers 3 -o out.md` |
 
 完整参数见 [references/REFERENCE.md](references/REFERENCE.md)。
+
+---
+
+## 多轮来回深度追问
+
+对视频"聊天"而不是重新生成文档——视频只上传一次，之后随便问：
+
+```bash
+python3 scripts/ask.py video.mp4 "第3分钟用的是什么工具？"
+python3 scripts/ask.py video.mp4 "它和上一步是什么关系？"      # 自动继续同一会话
+python3 scripts/ask.py video.mp4 -c tutorial.md "教程里哪步和视频对不上？"  # 带上已有分析追问
+python3 scripts/ask.py video.mp4 "..." -o answer.md            # 保存回答并抽取引用截图
+python3 scripts/ask.py video.mp4 --new "重新开始"               # 重置会话
+python3 scripts/ask.py --list                                   # 所有会话
+```
+
+- 回答强制标注 `[MM:SS]` 时间戳依据，找不到依据会明说。
+- 会话状态在 `sessions/`（已 gitignore）；File API 文件 ~48h 过期后自动重传。
+- 代理不支持 File API 时自动降级 inline（压缩产物缓存复用），多轮依旧可用。
+
+## 三种并行/交互模式怎么选
+
+| 场景 | 用法 |
+|------|------|
+| 多个视频各出一份文档 | `--batch --workers N`（多视频并行） |
+| 一个长视频尽快出文档 | `--parallel-chunks`（分段并行，牺牲段间连贯性） |
+| 对一个视频反复提问、逐步深入 | `ask.py`（会话式，上传一次） |
 
 ---
 

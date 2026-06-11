@@ -46,9 +46,12 @@ DEFAULTS = {
     "require_evidence": True,
     "chunk_minutes": 40,
     "keyframe_interval": 5,
+    "parallel_chunks": False,
     "auto_convert": True,
     "inline_max_mb": 6,
     "workers": 2,
+    "max_history": 20,
+    "session_dir": "",                   # "" -> SKILL_DIR/sessions
 }
 
 # Field -> python type for casting env / fallback-parsed string values.
@@ -61,9 +64,11 @@ _TYPES = {
     "require_evidence": bool,
     "chunk_minutes": int,
     "keyframe_interval": int,
+    "parallel_chunks": bool,
     "auto_convert": bool,
     "inline_max_mb": float,
     "workers": int,
+    "max_history": int,
 }
 
 
@@ -197,6 +202,7 @@ def load_config(cli=None, config_path: str | None = None) -> Config:
     a = yml.get("analysis", {}) if isinstance(yml.get("analysis"), dict) else {}
     v = yml.get("video", {}) if isinstance(yml.get("video"), dict) else {}
     b = yml.get("batch", {}) if isinstance(yml.get("batch"), dict) else {}
+    c = yml.get("chat", {}) if isinstance(yml.get("chat"), dict) else {}
 
     def resolve(field, cli_attr, env_name, yaml_val):
         cli_val = getattr(cli, cli_attr, None) if cli_attr else None
@@ -223,11 +229,15 @@ def load_config(cli=None, config_path: str | None = None) -> Config:
         "require_evidence": resolve("require_evidence", None, None, a.get("require_evidence")),
         "chunk_minutes":    resolve("chunk_minutes", "chunk_minutes", None, a.get("chunk_minutes")),
         "keyframe_interval": resolve("keyframe_interval", "keyframe_interval", None, a.get("keyframe_interval")),
+        "parallel_chunks":  resolve("parallel_chunks", "parallel_chunks", None, a.get("parallel_chunks")),
         # ── video ──
         "auto_convert":  resolve("auto_convert", None, None, v.get("auto_convert")),
         "inline_max_mb": resolve("inline_max_mb", None, None, v.get("inline_max_mb")),
         # ── batch ──
         "workers": resolve("workers", "workers", None, b.get("workers")),
+        # ── chat (multi-turn deep-dive sessions, scripts/ask.py) ──
+        "max_history": resolve("max_history", None, None, c.get("max_history")),
+        "session_dir": resolve("session_dir", None, "GEMINI_TUTOR_SESSION_DIR", c.get("session_dir")),
     }
     values["config_path"] = path
     return Config(values)
@@ -240,6 +250,10 @@ class _Empty:
 
 def resolve_prompts_dir(cfg: Config) -> Path:
     return Path(cfg.prompts_dir) if getattr(cfg, "prompts_dir", "") else SKILL_DIR / "prompts"
+
+
+def resolve_session_dir(cfg: Config) -> Path:
+    return Path(cfg.session_dir) if getattr(cfg, "session_dir", "") else SKILL_DIR / "sessions"
 
 
 # ─── Prompt profiles ────────────────────────────────────────────────────────

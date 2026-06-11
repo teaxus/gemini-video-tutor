@@ -67,6 +67,12 @@ analysis:
   # 固定间隔截图秒数（备用参数；当前默认按 Gemini 标注的关键帧按需提取）
   keyframe_interval: 5
 
+  # 单个长视频的分段是否并行分析（等效命令行 --parallel-chunks）
+  # false（默认）：顺序处理，每段携带前文上下文，编号连贯、质量最好
+  # true：各段并发处理（速度≈快 N 倍），但段与段之间互相看不见，
+  #       编号改用时间小节、可能出现少量重复表述。追求速度时再开。
+  parallel_chunks: false
+
 video:
   # Gemini 不支持的容器格式（如 .mkv / .ts）自动转换为 mp4 后再上传
   auto_convert: true
@@ -76,5 +82,14 @@ video:
   inline_max_mb: 6
 
 batch:
-  # 批量模式（--batch）默认并发处理数
+  # 批量模式（--batch）与分段并行（parallel_chunks）的默认并发数
   workers: 2
+
+chat:
+  # 多轮追问会话（scripts/ask.py）保留的最近对话轮数（一问一答算 1 轮）。
+  # 超出后丢弃最早的轮次（视频引用始终保留）。轮数越大上下文越完整、token 越贵
+  max_history: 20
+
+  # 会话存储目录。留空 = 本 skill 目录下的 sessions/（已被 .gitignore 忽略）
+  # 等效环境变量：GEMINI_TUTOR_SESSION_DIR
+  session_dir: ""
