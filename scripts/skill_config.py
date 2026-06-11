@@ -36,6 +36,7 @@ DEFAULTS = {
     "base_url": "https://generativelanguage.googleapis.com",
     "model": "gemini-2.5-flash",
     "auth": "auto",                      # auto | bearer | api-key
+    "api_style": "auto",                 # auto | gemini | openai
     "max_retries": 3,
     "retry_delay_seconds": 15,
     "request_timeout_seconds": 600,
@@ -49,6 +50,7 @@ DEFAULTS = {
     "parallel_chunks": False,
     "auto_convert": True,
     "inline_max_mb": 6,
+    "download_dir": "",                  # "" -> 与分析产物同目录（由 agent 执行流程遵循）
     "workers": 2,
     "max_history": 20,
     "session_dir": "",                   # "" -> SKILL_DIR/sessions
@@ -218,6 +220,7 @@ def load_config(cli=None, config_path: str | None = None) -> Config:
         "base_url":  resolve("base_url", "base_url", "GEMINI_BASE_URL", g.get("base_url")),
         "model":     resolve("model", "model", "GEMINI_MODEL", g.get("model")),
         "auth":      resolve("auth", "auth", "GEMINI_AUTH", g.get("auth")),
+        "api_style": resolve("api_style", "api_style", "GEMINI_API_STYLE", g.get("api_style")),
         "max_retries":            resolve("max_retries", None, "GEMINI_MAX_RETRIES", g.get("max_retries")),
         "retry_delay_seconds":    resolve("retry_delay_seconds", None, None, g.get("retry_delay_seconds")),
         "request_timeout_seconds": resolve("request_timeout_seconds", None, None, g.get("request_timeout_seconds")),
@@ -233,6 +236,7 @@ def load_config(cli=None, config_path: str | None = None) -> Config:
         # ── video ──
         "auto_convert":  resolve("auto_convert", None, None, v.get("auto_convert")),
         "inline_max_mb": resolve("inline_max_mb", None, None, v.get("inline_max_mb")),
+        "download_dir":  resolve("download_dir", None, "GEMINI_TUTOR_DOWNLOAD_DIR", v.get("download_dir")),
         # ── batch ──
         "workers": resolve("workers", "workers", None, b.get("workers")),
         # ── chat (multi-turn deep-dive sessions, scripts/ask.py) ──

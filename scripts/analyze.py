@@ -96,23 +96,39 @@ GEMINI_VIDEO_MIME = {
 # ─── API Client ───────────────────────────────────────────────────────────────
 
 class GeminiClient:
-    """Gemini API client supporting both File API upload and inline base64.
+    """Video-analysis API client. Speaks two wire protocols:
+
+      * Gemini native REST (`/v1beta/models/...:generateContent` + File API) —
+        official endpoint and Gemini-style relays.
+      * OpenAI-compatible chat completions (`/api/v1/chat/completions` with
+        `video_url` content parts) — OpenRouter / one-api style relays.
+
+    `api_style` selects the protocol. "auto" (default): the official Google
+    endpoint (googleapis.com) speaks gemini native; every other endpoint is
+    assumed to be an OpenAI-style relay (the de-facto standard for one-api /
+    new-api / OpenRouter). Set "gemini" explicitly for Gemini-native relays.
+    Internally everything stays in Gemini content format and is translated at
+    request time.
 
     Auth style is selected per `auth`:
       * "auto"    -> x-goog-api-key for official googleapis.com, else Bearer
       * "api-key" -> always x-goog-api-key (official Google REST style)
       * "bearer"  -> always Authorization: Bearer (most proxies / relays)
+    OpenAI-style endpoints always use Bearer.
     """
+
+    USER_AGENT = "gemini-video-tutor/3.1"  # default urllib UA gets blocked by some CDNs
 
     def __init__(self, api_key: str, base_url: str, model: str = DEFAULT_MODEL,
                  auth: str = "auto", max_retries: int = 3, retry_delay: int = 15,
                  timeout: int = 600, max_output_tokens: int = 65536,
                  temperature: float = 0.4, inline_max_mb: float = DEFAULT_INLINE_MAX_MB,
-                 auto_convert: bool = True):
+                 auto_convert: bool = True, api_style: str = "auto"):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.auth = (auth or "auto").lower()
+        self.api_style = (api_style or "auto").lower()
         self.max_retries = max(1, int(max_retries))
         self.retry_delay = int(retry_delay)
         self.timeout = int(timeout)
@@ -121,18 +137,37 @@ class GeminiClient:
         self.inline_max_mb = float(inline_max_mb)
         self.auto_convert = bool(auto_convert)
 
+    def resolved_style(self) -> str:
+        if self.api_style == "auto":
+            # OpenAI-compatible is the de-facto relay standard; only Google's
+            # own endpoint defaults to native (it has no /v1/chat/completions,
+            # and native unlocks the File API for large uploads).
+            return "gemini" if "googleapis.com" in self.base_url else "openai"
+        return self.api_style
+
     # ── auth ──
     def _auth_headers(self) -> dict:
+        if self.resolved_style() == "openai":
+            return {"Authorization": f"Bearer {self.api_key}",
+                    "User-Agent": self.USER_AGENT}
         style = self.auth
         if style == "auto":
             style = "api-key" if "googleapis.com" in self.base_url else "bearer"
         if style == "api-key":
-            return {"x-goog-api-key": self.api_key}
-        return {"Authorization": f"Bearer {self.api_key}"}
+            return {"x-goog-api-key": self.api_key, "User-Agent": self.USER_AGENT}
+        return {"Authorization": f"Bearer {self.api_key}", "User-Agent": self.USER_AGENT}
 
     @property
     def generate_endpoint(self) -> str:
         return f"{self.base_url}/v1beta/models/{self.model}:generateContent"
+
+    @property
+    def openai_endpoint(self) -> str:
+        base = self.base_url
+        if base.endswith("/v1") or base.endswith("/api/v1"):
+            return f"{base}/chat/completions"  # user already included the prefix
+        prefix = "/api/v1" if "openrouter.ai" in base else "/v1"
+        return f"{base}{prefix}/chat/completions"
 
     @property
     def upload_endpoint(self) -> str:
@@ -140,6 +175,8 @@ class GeminiClient:
 
     def upload_file(self, file_path: str, mime_type: str = "video/mp4"):
         """Upload a file via Gemini File API. Returns file metadata or None if unsupported."""
+        if self.resolved_style() == "openai":
+            return None  # no File API on OpenAI-style endpoints -> inline base64
         file_size = os.path.getsize(file_path)
         display_name = Path(file_path).name
 
@@ -223,23 +260,62 @@ class GeminiClient:
         except Exception:
             pass
 
+    def _to_openai_messages(self, contents: list, system_instruction: str) -> list:
+        """Translate Gemini-format contents into OpenAI chat messages.
+
+        text -> {"type":"text"}; inlineData -> video_url data URL;
+        fileData -> video_url with the original URI.
+        """
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        for turn in contents:
+            role = "assistant" if turn.get("role") == "model" else "user"
+            content = []
+            for part in turn.get("parts", []):
+                if "text" in part:
+                    content.append({"type": "text", "text": part["text"]})
+                elif "inlineData" in part:
+                    d = part["inlineData"]
+                    content.append({"type": "video_url", "video_url": {
+                        "url": f"data:{d.get('mimeType', 'video/mp4')};base64,{d['data']}"}})
+                elif "fileData" in part:
+                    content.append({"type": "video_url", "video_url": {
+                        "url": part["fileData"].get("fileUri", "")}})
+            if role == "assistant":  # assistant turns are plain text
+                text = "\n".join(c["text"] for c in content if c.get("type") == "text")
+                messages.append({"role": role, "content": text})
+            else:
+                messages.append({"role": role, "content": content})
+        return messages
+
     def generate(self, contents: list, system_instruction: str = "",
                  max_output_tokens: int = 0, timeout: int = 0) -> str:
-        """Send generateContent request, return text response."""
-        payload = {
-            "contents": contents,
-            "generationConfig": {
-                "maxOutputTokens": max_output_tokens or self.max_output_tokens,
+        """Send a generation request (protocol per api_style), return text response."""
+        if self.resolved_style() == "openai":
+            endpoint = self.openai_endpoint
+            payload = {
+                "model": self.model,
+                "messages": self._to_openai_messages(contents, system_instruction),
+                "max_tokens": max_output_tokens or self.max_output_tokens,
                 "temperature": self.temperature,
             }
-        }
-        if system_instruction:
-            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+        else:
+            endpoint = self.generate_endpoint
+            payload = {
+                "contents": contents,
+                "generationConfig": {
+                    "maxOutputTokens": max_output_tokens or self.max_output_tokens,
+                    "temperature": self.temperature,
+                }
+            }
+            if system_instruction:
+                payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
         data = json.dumps(payload).encode("utf-8")
         headers = {**self._auth_headers(), "Content-Type": "application/json"}
         req = urllib.request.Request(
-            self.generate_endpoint, data=data, headers=headers, method="POST"
+            endpoint, data=data, headers=headers, method="POST"
         )
 
         for attempt in range(1, self.max_retries + 1):
@@ -266,6 +342,12 @@ class GeminiClient:
         return ""
 
     def _extract_text(self, result: dict) -> str:
+        if self.resolved_style() == "openai":
+            choices = result.get("choices", [])
+            if not choices:
+                return ""
+            content = choices[0].get("message", {}).get("content", "")
+            return content if isinstance(content, str) else ""
         candidates = result.get("candidates", [])
         if not candidates:
             return ""
@@ -864,7 +946,7 @@ def make_client(cfg: Config, model: str = "") -> GeminiClient:
         auth=cfg.auth, max_retries=cfg.max_retries, retry_delay=cfg.retry_delay_seconds,
         timeout=cfg.request_timeout_seconds, max_output_tokens=cfg.max_output_tokens,
         temperature=cfg.temperature, inline_max_mb=cfg.inline_max_mb,
-        auto_convert=cfg.auto_convert,
+        auto_convert=cfg.auto_convert, api_style=cfg.api_style,
     )
 
 
@@ -872,10 +954,11 @@ def make_client(cfg: Config, model: str = "") -> GeminiClient:
 
 def process_one(input_val: str, output_file: str, keyframe_dir: str,
                 cfg: Config, profile: Profile):
-    """Process a single video. Returns (input_val, success, message)."""
+    """Process a single video. Returns (input_val, success, message, elapsed_sec)."""
+    start = time.time()
     try:
         if not os.path.exists(input_val):
-            return (input_val, False, f"File not found: {input_val}")
+            return (input_val, False, f"File not found: {input_val}", 0.0)
 
         client = make_client(cfg)
         duration = get_duration(input_val)
@@ -892,9 +975,50 @@ def process_one(input_val: str, output_file: str, keyframe_dir: str,
             os.makedirs(parent, exist_ok=True)
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(result + footer)
-        return (input_val, True, output_file)
+        return (input_val, True, output_file, time.time() - start)
     except Exception as e:
-        return (input_val, False, str(e))
+        return (input_val, False, str(e), time.time() - start)
+
+
+def is_output_complete(md_path: str) -> bool:
+    """A batch output counts as complete when the MD exists with its META footer
+    and contains no failed-chunk markers (so re-runs retry partial results)."""
+    try:
+        doc = Path(md_path).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return bool(ANALYSIS_META_PATTERN.search(doc)) and not RESUME_FAIL_PATTERN.search(doc)
+
+
+def write_batch_report(output_dir: str, rows: list, cfg: Config, profile_name: str):
+    """Write _batch_report.md summarizing every video's outcome."""
+    ok = sum(1 for r in rows if r[2] == "ok")
+    fail = sum(1 for r in rows if r[2] == "failed")
+    skipped = sum(1 for r in rows if r[2] == "skipped")
+    icon = {"ok": "✅", "failed": "❌", "skipped": "⏭️"}
+    lines = [
+        "# 批量分析报告\n",
+        f"- 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- 模型：`{cfg.model}` | 方法：`{profile_name}` | 并发：{cfg.workers}",
+        f"- 结果：✅ {ok} 成功 / ❌ {fail} 失败 / ⏭️ {skipped} 跳过（共 {len(rows)}）",
+        "",
+        "| 状态 | 视频 | 产物 / 原因 | 耗时 |",
+        "|------|------|------------|------|",
+    ]
+    for name, input_val, status, elapsed, detail in sorted(rows):
+        if status == "ok":
+            detail_cell = f"[{name}.md]({name}/{name}.md)"
+        elif status == "skipped":
+            detail_cell = "已完成，跳过"
+        else:
+            detail_cell = str(detail).replace("|", "\\|").replace("\n", " ")[:200]
+        t = f"{elapsed:.0f}s" if status == "ok" else "-"
+        lines.append(f"| {icon[status]} | `{Path(input_val).name}` | {detail_cell} | {t} |")
+    if fail:
+        lines += ["", "> ❌ 有失败项：重跑同一条命令即可只补失败的（已完成的会自动跳过）。"]
+    report = os.path.join(output_dir, "_batch_report.md")
+    Path(report).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return report
 
 
 def resolve_batch_inputs(batch_path: str):
@@ -933,6 +1057,9 @@ Examples:
                         help="Batch mode: directory of videos or text file with one path per line")
     parser.add_argument("--output-dir", default=".",
                         help="Output directory for batch mode (default: current dir)")
+    parser.add_argument("--force", action="store_true",
+                        help="Batch mode: re-analyze videos whose output already exists "
+                             "(default skips completed ones, making re-runs resumable)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Parallel workers in batch mode (default: config batch.workers)")
     parser.add_argument("-m", "--model", default=None,
@@ -943,6 +1070,9 @@ Examples:
                         help="Path to config.yaml (overrides GEMINI_TUTOR_CONFIG / default)")
     parser.add_argument("--auth", default=None, choices=["auto", "bearer", "api-key"],
                         help="Auth style (default: auto — api-key for official, bearer for proxies)")
+    parser.add_argument("--api-style", default=None, choices=["auto", "gemini", "openai"],
+                        help="Wire protocol: gemini native REST or OpenAI-compatible chat "
+                             "completions (default: auto — openai for openrouter.ai)")
     parser.add_argument("--chunk-minutes", type=int, default=None,
                         help="Max minutes per chunk (overrides config)")
     parser.add_argument("--no-chunk", action="store_true",
@@ -1002,31 +1132,52 @@ Examples:
 
         output_dir = args.output_dir
         os.makedirs(output_dir, exist_ok=True)
-        print(f"Batch: {len(inputs)} videos | workers={cfg.workers} | output={output_dir}", file=sys.stderr)
+        skip = not args.force
+        print(f"Batch: {len(inputs)} videos | workers={cfg.workers} | output={output_dir}"
+              f"{' | skip-existing' if skip else ' | force'}", file=sys.stderr)
 
-        def build_output_paths(input_val):
+        # One subdirectory per video: <output_dir>/<stem>/{<stem>.md, <stem>_frames/}.
+        # Duplicate stems get _2, _3, ... so nothing is silently overwritten.
+        used_names = set()
+
+        def assign_output(input_val):
             stem = Path(input_val).stem
-            return (os.path.join(output_dir, f"{stem}.md"),
-                    os.path.join(output_dir, f"{stem}_frames"))
+            name, n = stem, 1
+            while name in used_names:
+                n += 1
+                name = f"{stem}_{n}"
+            used_names.add(name)
+            vdir = os.path.join(output_dir, name)
+            return (name, os.path.join(vdir, f"{name}.md"),
+                    os.path.join(vdir, f"{name}_frames"))
 
+        rows = []  # (name, input_val, status, elapsed_sec, detail)
         futures_map = {}
         with ThreadPoolExecutor(max_workers=cfg.workers) as executor:
             for input_val in inputs:
-                out_md, out_frames = build_output_paths(input_val)
+                name, out_md, out_frames = assign_output(input_val)
+                if skip and is_output_complete(out_md):
+                    rows.append((name, input_val, "skipped", 0.0, out_md))
+                    print(f"  ⏭️  {name}: 已完成，跳过（--force 可强制重跑）", file=sys.stderr)
+                    continue
                 future = executor.submit(process_one, input_val, out_md, out_frames, cfg, profile)
-                futures_map[future] = input_val
+                futures_map[future] = (name, input_val)
 
-            ok, fail = 0, 0
             for future in as_completed(futures_map):
-                input_val, success, msg = future.result()
-                if success:
-                    ok += 1
-                    print(f"  ✅ {Path(input_val).name} → {msg}", file=sys.stderr)
-                else:
-                    fail += 1
-                    print(f"  ❌ {Path(input_val).name}: {msg}", file=sys.stderr)
+                name, input_val = futures_map[future]
+                _, success, msg, elapsed = future.result()
+                rows.append((name, input_val, "ok" if success else "failed", elapsed, msg))
+                symbol = "✅" if success else "❌"
+                print(f"  {symbol} {name} ({elapsed:.0f}s): {msg}", file=sys.stderr)
 
-        print(f"\nBatch complete: {ok} succeeded, {fail} failed.", file=sys.stderr)
+        ok = sum(1 for r in rows if r[2] == "ok")
+        fail = sum(1 for r in rows if r[2] == "failed")
+        skipped = sum(1 for r in rows if r[2] == "skipped")
+        report = write_batch_report(output_dir, rows, cfg, profile.name)
+        print(f"\nBatch complete: {ok} succeeded, {fail} failed, {skipped} skipped.", file=sys.stderr)
+        print(f"📋 Report: {report}", file=sys.stderr)
+        if fail:
+            print("   重跑同一条命令即可只补失败项（已完成的自动跳过）。", file=sys.stderr)
         sys.exit(0 if fail == 0 else 1)
 
     # ── Single mode ──

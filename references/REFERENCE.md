@@ -10,6 +10,7 @@
 | `--config PATH` | 指定 config.yaml 路径 | env `GEMINI_TUTOR_CONFIG` 或 skill 目录 |
 | `-m MODEL` | 模型（覆盖 env/config） | config `gemini.model` |
 | `--auth STYLE` | 认证：`auto`/`bearer`/`api-key` | config `gemini.auth`（auto） |
+| `--api-style STYLE` | 协议：`auto`/`gemini`/`openai`（见下「接口协议兼容性」） | config `gemini.api_style`（auto） |
 | `--chunk-minutes N` | 长视频分段时长上限 | config `analysis.chunk_minutes`（40） |
 | `--no-chunk` | 禁用自动分段 | - |
 | `--parallel-chunks` | 单视频分段并发分析（见下「并行模型」） | config `analysis.parallel_chunks`（false） |
@@ -22,6 +23,7 @@
 | `--batch DIR_OR_FILE` | 批量模式：目录或列表文件 | - |
 | `--output-dir DIR` | 批量输出目录 | 当前目录 |
 | `--workers N` | 批量/分段并发数 | config `batch.workers`（2） |
+| `--force` | 批量模式强制重跑已完成的视频 | 默认跳过已完成 |
 
 ## 命令行参数（ask.py — 多轮追问会话）
 
@@ -35,11 +37,19 @@
 | `--list` | 列出所有会话 |
 | `-m / --config / --auth / --api-key / --base-url` | 同 analyze.py |
 
+## 接口协议兼容性（api_style）
+
+`auto`（默认）的判定：官方 `googleapis.com` → **gemini 原生**（`/v1beta/...:generateContent` + File API，支持 2GB 大文件上传）；**其它端点 → openai 兼容**（`chat/completions`，OpenRouter/one-api/new-api 的事实标准）。
+
+- openai 模式：视频以 base64 `video_url` 内联发送（无 File API，受 `inline_max_mb` 限制，超限自动压缩）；认证恒为 Bearer；模型名按中转要求填（如 `google/gemini-2.5-flash`）。
+- openai 路径自适应：`openrouter.ai` 用 `/api/v1/chat/completions`，其它用 `/v1/chat/completions`；base_url 已以 `/v1` 或 `/api/v1` 结尾则直接拼 `/chat/completions`。
+- 中转是 **Gemini 原生协议透传**（如部分多协议站的 gemini 通道）时，显式设 `api_style: "gemini"`。
+
 ## 并行模型
 
 三个互不冲突的层级：
 
-1. **多视频并行**：`analyze.py --batch ... --workers N`，N 个视频同时各自完整分析。
+1. **多视频并行**：`analyze.py --batch ... --workers N`，N 个视频同时各自完整分析。输出为**每视频一个子目录** `输出目录/<视频名>/{<视频名>.md, <视频名>_frames/}`，重名自动加 `_2/_3` 序号；**默认跳过已完成的视频**（产物含完整元数据且无失败分段标记），中断后重跑同一命令即只补缺口，`--force` 强制全重跑；结束时在输出目录生成 `_batch_report.md`（每个视频的状态/耗时/失败原因）。
 2. **单视频分段并行**：`--parallel-chunks`（或 config `analysis.parallel_chunks: true`），长视频的各分段同时分析,速度约提升 workers 倍。代价：各段相互看不到（无累积上下文），全局编号退化为按时间的小节标题，可能有少量重复表述。**默认关（顺序模式质量最好）**，赶时间再开。失败段同样打 `CHUNK_FAILED` 标记，`--resume` 兼容。
 3. **多轮会话**（ask.py）：与上述正交，单视频上传一次后反复追问。
 
@@ -58,7 +68,8 @@
 **命令行参数 > 环境变量 > config.yaml > 内置默认值**。
 
 - config.yaml 全部可配置项见 [example.config.yaml](../example.config.yaml)。
-- 环境变量：`GEMINI_API_KEY`、`GEMINI_BASE_URL`、`GEMINI_MODEL`、`GEMINI_AUTH`、`GEMINI_TUTOR_PROFILE`、`GEMINI_TUTOR_CONFIG`、`GEMINI_TUTOR_PROMPTS_DIR`、`GEMINI_TUTOR_SESSION_DIR`、`GEMINI_MAX_RETRIES`。
+- 环境变量：`GEMINI_API_KEY`、`GEMINI_BASE_URL`、`GEMINI_MODEL`、`GEMINI_AUTH`、`GEMINI_API_STYLE`、`GEMINI_TUTOR_PROFILE`、`GEMINI_TUTOR_CONFIG`、`GEMINI_TUTOR_PROMPTS_DIR`、`GEMINI_TUTOR_SESSION_DIR`、`GEMINI_TUTOR_DOWNLOAD_DIR`、`GEMINI_MAX_RETRIES`。
+- 在线视频下载位置：`video.download_dir` 非空用它，否则下载进分析产物目录（agent 执行流程遵循，见 SKILL.md 第 2 步）。
 - 空字符串（如模板里的 `api_key: ""`）视为"未设置"，不会覆盖更低优先级来源。
 - YAML 解析：装了 PyYAML 用之，否则用内置极简解析器（仅支持两级嵌套+标量，足够 config.yaml）。
 

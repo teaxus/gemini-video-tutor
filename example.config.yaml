@@ -30,6 +30,16 @@ gemini:
   #   bearer  —— 强制 Authorization: Bearer（大多数中转/代理）
   auth: "auto"
 
+  # 接口协议（等效环境变量：GEMINI_API_STYLE）
+  #   auto   —— 自动判断（推荐）：官方 googleapis.com 走 gemini 原生协议，
+  #             其它一律按 OpenAI 兼容中转处理（OpenRouter/one-api/new-api 的事实标准）
+  #   openai —— 强制 OpenAI 兼容 chat/completions（视频以 base64 video_url 内联发送，
+  #             模型名按中转要求填，如 google/gemini-2.5-flash；
+  #             路径自适应：openrouter.ai 用 /api/v1/，其它用 /v1/，base_url 已含前缀则不重复加）
+  #   gemini —— 强制 Gemini 原生 REST（/v1beta/...:generateContent + File API）。
+  #             仅当你的中转是 Gemini 原生协议透传（如部分多协议站的 gemini 通道）时设置
+  api_style: "auto"
+
   # 请求失败（429 限流 / 503 过载 / 网络错误）时的最大尝试次数
   max_retries: 3
 
@@ -76,6 +86,12 @@ analysis:
 video:
   # Gemini 不支持的容器格式（如 .mkv / .ts）自动转换为 mp4 后再上传
   auto_convert: true
+
+  # 在线视频（经 video-downloader）下载到哪（等效环境变量：GEMINI_TUTOR_DOWNLOAD_DIR）
+  # 留空（推荐）= 下载进本次分析的产物目录，视频/文档/截图同目录，方便整体归档，
+  # 也保证 --resume 和 ask.py 会话引用的视频路径长期有效
+  # 填固定目录（如 ~/Videos/library）= 所有下载集中存放
+  download_dir: ""
 
   # File API 不可用、降级为 inline base64 上传时的体积上限（MB）。
   # 超过该值自动压缩（720p H.264）。base64 膨胀约 33%，代理常见限制 10MB → 默认 6

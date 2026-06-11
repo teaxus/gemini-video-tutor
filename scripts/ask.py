@@ -312,6 +312,7 @@ Examples:
     parser.add_argument("-m", "--model", default=None, help="Model name (overrides env/config)")
     parser.add_argument("--config", default=None, help="Path to config.yaml")
     parser.add_argument("--auth", default=None, choices=["auto", "bearer", "api-key"])
+    parser.add_argument("--api-style", default=None, choices=["auto", "gemini", "openai"])
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--base-url", default=None)
     args = parser.parse_args()

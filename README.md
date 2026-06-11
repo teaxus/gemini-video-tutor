@@ -6,7 +6,8 @@
 - ✅ 每条结论带依据：时间戳 `[MM:SS]` + 关键画面 `[screenshot_MM_SS.jpg]`，自动抽帧嵌图
 - ✅ 长视频自动分段，顺序携带前文上下文，保证连贯（赶时间可 `--parallel-chunks` 分段并行）
 - ✅ 分段失败 `--resume` 断点续传，文档本身即状态，无需额外状态文件
-- ✅ 批量并发处理
+- ✅ 批量并发处理：每视频一个子目录、自动跳过已完成（断点续传）、生成批量报告
+- ✅ 官方端点与 OpenAI 兼容中转（OpenRouter/one-api 等）自动适配协议
 - ✅ **多轮来回深度追问**（`ask.py`）：视频上传一次（File API ~48h），对话历史持久化，连续追问不重新上传、不重新分析
 - ✅ 分析方法（提示词）外置成文件，改完即时生效，无需重启
 - ✅ 跨通用 agent（Claude Code / Codex / openclaw 等）：零强制依赖，PyYAML 可选，认证自动适配官方/代理
@@ -131,7 +132,12 @@ prompts/
 python3 scripts/setup.py --install-downloader   # 自动克隆到相邻目录
 ```
 
-下载后用本地路径作为输入。
+下载后用本地路径作为输入。**默认把视频下载进分析输出目录**（video-downloader 第三个参数指定），让 `视频 + 分析.md + 截图` 在同一目录里，方便整体归档/删除，也保证 `--resume` 和 `ask.py` 会话引用的路径长期有效；想集中存放则在 config 设 `video.download_dir: ~/Videos/library` 之类的固定目录：
+
+```bash
+python3 <video-downloader>/scripts/video_downloader.py "<URL>" 1080p ~/Downloads/my_analysis/
+python3 scripts/analyze.py ~/Downloads/my_analysis/视频.mp4 -o ~/Downloads/my_analysis/分析.md
+```
 
 ---
 

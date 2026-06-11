@@ -127,7 +127,11 @@ def check_config():
         _print(BAD, "base_url 未配置")
         key_ok = False
 
-    _print(OK, f"模型：{cfg.model} | 认证：{cfg.auth} | 分析方法：{cfg.profile}")
+    style = cfg.api_style
+    if style == "auto":
+        resolved = "gemini" if "googleapis.com" in (cfg.base_url or "") else "openai"
+        style = f"auto→{resolved}"
+    _print(OK, f"模型：{cfg.model} | 协议：{style} | 认证：{cfg.auth} | 分析方法：{cfg.profile}")
     return key_ok, cfg
 
 
