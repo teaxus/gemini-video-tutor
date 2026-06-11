@@ -34,7 +34,8 @@ metadata:
    ```bash
    python3 ./scripts/setup.py
    ```
-   - 缺 ffmpeg → 按提示安装（`brew install ffmpeg` / `apt-get install ffmpeg`）。
+   - 缺 ffmpeg → 按提示安装（macOS `brew install ffmpeg` / Linux `apt-get install ffmpeg` / Windows `winget install Gyan.FFmpeg`）。
+   - Windows 环境用 `python` 代替 `python3` 调用本 skill 的所有脚本。
    - 没有 config.yaml → `python3 ./scripts/setup.py --init-config` 生成，然后引导用户在 `config.yaml` 填 `gemini.api_key`（该文件已被 .gitignore 忽略）。
    - 体检 exit code 为 0 才进入分析。
 2. **判断输入类型**：

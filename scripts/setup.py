@@ -63,6 +63,9 @@ def check_ffmpeg() -> bool:
             _print(WARN, "安装：brew install ffmpeg")
         elif sys.platform.startswith("linux"):
             _print(WARN, "安装：sudo apt-get install ffmpeg  (或对应包管理器)")
+        elif sys.platform == "win32":
+            _print(WARN, "安装：winget install Gyan.FFmpeg  (或 choco install ffmpeg；"
+                         "装完重开终端使 PATH 生效)")
         else:
             _print(WARN, "请从 https://ffmpeg.org/download.html 安装 ffmpeg")
     return ok

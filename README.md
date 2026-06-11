@@ -20,10 +20,15 @@
 
 ### 1. 依赖
 
-- **Python 3.8+**
-- **FFmpeg**（`ffmpeg` + `ffprobe`）：`brew install ffmpeg`（macOS）/ `sudo apt-get install ffmpeg`（Debian/Ubuntu）
-- Gemini API key（官方或任意兼容中转）
-- PyYAML 可选（`pip install pyyaml`）
+| 依赖 | 是否必需 | 安装方式 |
+|------|---------|---------|
+| **Python 3.8+** | 必需 | macOS/Linux 一般自带；Windows 从 [python.org](https://www.python.org/downloads/) 安装（勾选 "Add Python to PATH"） |
+| **FFmpeg**（含 `ffprobe`） | 必需（分段/抽帧/转码） | macOS：`brew install ffmpeg`<br>Debian/Ubuntu：`sudo apt-get install ffmpeg`<br>Windows：`winget install Gyan.FFmpeg`（或 `choco install ffmpeg`） |
+| **[video-downloader](https://github.com/teaxus/video-downloader)** | **依赖 skill**：输入是在线 URL（YouTube/B站/抖音/TikTok 等）时必需；只分析本地文件可不装 | 自动：`python3 scripts/setup.py --install-downloader`<br>手动：`git clone https://github.com/teaxus/video-downloader` 到本 skill 的同级目录（或任一 agent skills 目录） |
+| **Gemini API key** | 必需 | 官方 [AI Studio](https://aistudio.google.com/apikey)，或任意兼容中转（OpenRouter/one-api 等） |
+| PyYAML | 可选 | `pip install pyyaml`；不装则自动用内置解析器，功能不受影响 |
+
+> **🪟 Windows 用户**：本文所有命令里的 `python3` 请换成 `python`；路径中的 `~` 在 PowerShell 可直接用，CMD 下请换成 `%USERPROFILE%`。运行 `python scripts/setup.py` 体检会逐项告诉你缺什么、怎么装。
 
 ### 2. 配置
 
@@ -124,19 +129,35 @@ prompts/
 
 ---
 
-## 在线视频
+## 在线视频（URL 输入）
 
-本 skill 只处理本地文件。在线 URL 请先用 [video-downloader](https://github.com/teaxus/video-downloader) 下载：
+本 skill 只分析**本地文件**。输入是在线 URL（YouTube/B站/抖音/TikTok 等）时，先用依赖 skill [video-downloader](https://github.com/teaxus/video-downloader) 把它下载下来，一共三步：
 
 ```bash
-python3 scripts/setup.py --install-downloader   # 自动克隆到相邻目录
+# ① 安装依赖 skill（只需一次，已装会自动跳过）
+python3 scripts/setup.py --install-downloader
+#    等效手动安装：
+#    git clone https://github.com/teaxus/video-downloader <本skill同级目录>/video-downloader
+
+# ② 下载视频。第三个参数 = 你准备放分析结果的目录
+python3 <video-downloader目录>/scripts/video_downloader.py "<视频URL>" 1080p ~/Downloads/my_analysis/
+
+# ③ 用下载得到的本地路径分析，产物输出到同一目录
+python3 scripts/analyze.py ~/Downloads/my_analysis/video.mp4 -o ~/Downloads/my_analysis/分析.md
 ```
 
-下载后用本地路径作为输入。**默认把视频下载进分析输出目录**（video-downloader 第三个参数指定），让 `视频 + 分析.md + 截图` 在同一目录里，方便整体归档/删除，也保证 `--resume` 和 `ask.py` 会话引用的路径长期有效；想集中存放则在 config 设 `video.download_dir: ~/Videos/library` 之类的固定目录：
+> `<video-downloader目录>` 装在哪？运行 `python3 scripts/setup.py` 体检，它会打印检测到的安装位置。Windows 把 `python3` 换成 `python`、`~/Downloads` 换成 `%USERPROFILE%\Downloads`。
 
-```bash
-python3 <video-downloader>/scripts/video_downloader.py "<URL>" 1080p ~/Downloads/my_analysis/
-python3 scripts/analyze.py ~/Downloads/my_analysis/视频.mp4 -o ~/Downloads/my_analysis/分析.md
+**为什么视频要和分析结果放同一目录？**
+
+- `视频.mp4 + 分析.md + 截图目录` 是一组产物，放一起才方便整体归档或删除；
+- 分析文档的元数据里记录了视频路径，`--resume` 断点续传和 `ask.py` 多轮会话都依赖这个路径长期有效——视频丢在临时目录被系统清掉，这两个功能就静默失效了。
+
+如果你更想把所有视频集中存进一个**固定的视频库**（不跟着分析目录走），在 `config.yaml` 里设：
+
+```yaml
+video:
+  download_dir: "~/Videos/library"   # 由 agent 调用时，视频统一下载到这里
 ```
 
 ---
