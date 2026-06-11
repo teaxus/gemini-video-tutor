@@ -1,0 +1,124 @@
+# 🎬 Gemini Video Tutor
+
+用 **Gemini** 分析视频，产出**结构化、可溯源**的 Markdown 文档。默认把视频整理成"任何人照着就能复现"的操作教程，分析方法可自由配置（摘要、字幕、复盘……）。
+
+- ✅ 整段视频直传 Gemini（File API，最大 ~2GB），原生 1FPS 采样 + 音频分析
+- ✅ 每条结论带依据：时间戳 `[MM:SS]` + 关键画面 `[screenshot_MM_SS.jpg]`，自动抽帧嵌图
+- ✅ 长视频自动分段，顺序携带前文上下文，保证连贯
+- ✅ 分段失败 `--resume` 断点续传，文档本身即状态，无需额外状态文件
+- ✅ 批量并发处理
+- ✅ 分析方法（提示词）外置成文件，改完即时生效，无需重启
+- ✅ 跨通用 agent（Claude Code / Codex / openclaw 等）：零强制依赖，PyYAML 可选，认证自动适配官方/代理
+
+> 这是一个 [Agent Skill](https://agentskills.io/)。它通常由 AI agent 调用，你也可以直接命令行运行。
+
+---
+
+## 快速开始
+
+### 1. 依赖
+
+- **Python 3.8+**
+- **FFmpeg**（`ffmpeg` + `ffprobe`）：`brew install ffmpeg`（macOS）/ `sudo apt-get install ffmpeg`（Debian/Ubuntu）
+- Gemini API key（官方或任意兼容中转）
+- PyYAML 可选（`pip install pyyaml`）
+
+### 2. 配置
+
+```bash
+python3 scripts/setup.py --init-config   # 从模板生成 config.yaml
+```
+
+编辑 `config.yaml` 填入你的 key：
+
+```yaml
+gemini:
+  api_key: "你的key"
+  base_url: "https://generativelanguage.googleapis.com"  # 官方；或你的代理地址
+  model: "gemini-2.5-flash"
+```
+
+> `config.yaml` 已被 `.gitignore` 忽略，密钥不会进 git。也可改用环境变量 `GEMINI_API_KEY` / `GEMINI_BASE_URL` / `GEMINI_MODEL`。
+
+### 3. 体检 & 运行
+
+```bash
+python3 scripts/setup.py                              # 确认一切就绪
+python3 scripts/analyze.py "/path/to/video.mp4" -o tutorial.md
+```
+
+产物：`tutorial.md` + 同名 `tutorial_frames/` 截图目录。
+
+---
+
+## 常用命令
+
+| 目的 | 命令 |
+|------|------|
+| 默认教程 | `analyze.py video.mp4 -o out.md` |
+| 内容摘要 | `analyze.py video.mp4 --profile summary -o out.md` |
+| 指定模型/分段 | `analyze.py v.mp4 -m gemini-3-pro-preview --chunk-minutes 30 -o out.md` |
+| 临时提示词 | `analyze.py v.mp4 --prompt "只提取所有命令行命令" -o cmds.md` |
+| 断点续传 | `analyze.py --resume out.md` |
+| 批量并发 | `analyze.py --batch ./videos/ --output-dir ./out/ --workers 3` |
+
+完整参数见 [references/REFERENCE.md](references/REFERENCE.md)。
+
+---
+
+## 自定义分析方法
+
+提示词放在 [`prompts/`](prompts/) 下，每个 `.md` 是一种方法：
+
+```
+prompts/
+  tutorial.md   # 操作教程（默认）
+  summary.md    # 内容摘要
+  我的方法.md    # ← 复制一份改成你自己的
+```
+
+格式（详见 `prompts/tutorial.md`）：
+
+```markdown
+# @system
+（角色与总原则，可选）
+
+# @prompt
+（主分析提示词，必填）
+
+# @continuation
+（长视频分段续写模板，可选；占位符 {chunk_index} {total_chunks} {start_time} {end_time} {previous_doc}）
+```
+
+选用：`--profile 我的方法`，或 config 里 `analysis.profile: 我的方法`。**改完立即生效，无需重启。**
+
+---
+
+## 在线视频
+
+本 skill 只处理本地文件。在线 URL 请先用 [video-downloader](https://github.com/teaxus/video-downloader) 下载：
+
+```bash
+python3 scripts/setup.py --install-downloader   # 自动克隆到相邻目录
+```
+
+下载后用本地路径作为输入。
+
+---
+
+## 输出结构
+
+```
+tutorial.md          # 文档，底部含源视频路径/模型/方法等元数据（供 --resume 使用）
+tutorial_frames/     # 关键帧截图
+  screenshot_00_05.jpg
+  ...
+```
+
+---
+
+## 安全说明
+
+- **不要把真实 key 写进会提交的文件。** key 只放 `config.yaml`（已忽略）或环境变量。
+- 视频会上传到你配置的 Gemini 端点（官方或你的代理）。请确认对该端点的信任与合规。
+- 若 key 曾经泄露，去对应控制台轮换。

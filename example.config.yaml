@@ -1,0 +1,80 @@
+# =====================================================================
+# Gemini Video Tutor — 配置模板
+#
+# 使用方法：
+#   cp example.config.yaml config.yaml   # 然后编辑 config.yaml 填入实际值
+#
+# 注意：
+#   - config.yaml 已被 .gitignore 忽略，真实密钥只写在 config.yaml 里
+#   - 配置优先级：命令行参数 > 环境变量 > config.yaml > 内置默认值
+#   - 可用环境变量 GEMINI_TUTOR_CONFIG 指定其他配置文件路径
+#   - 仅支持本文件展示的 YAML 子集（两级嵌套 + 标量），不要使用锚点/列表等高级语法
+# =====================================================================
+
+gemini:
+  # 【必填】Gemini API Key（等效环境变量：GEMINI_API_KEY）
+  api_key: ""
+
+  # API 入口地址（等效环境变量：GEMINI_BASE_URL）
+  # 官方：https://generativelanguage.googleapis.com
+  # 使用代理/中转时填代理地址，注意不带 /v1beta/ 后缀
+  base_url: "https://generativelanguage.googleapis.com"
+
+  # 分析使用的模型（等效环境变量：GEMINI_MODEL）
+  # 常用：gemini-2.5-flash / gemini-2.5-pro / gemini-3-flash-preview / gemini-3-pro-preview
+  model: "gemini-2.5-flash"
+
+  # 认证方式（等效环境变量：GEMINI_AUTH）。决定能否用官方 Gemini 端点。
+  #   auto    —— 自动判断：官方 googleapis.com 用 x-goog-api-key，其它代理用 Bearer（推荐）
+  #   api-key —— 强制 x-goog-api-key 头（Google 官方 REST 风格）
+  #   bearer  —— 强制 Authorization: Bearer（大多数中转/代理）
+  auth: "auto"
+
+  # 请求失败（429 限流 / 503 过载 / 网络错误）时的最大尝试次数
+  max_retries: 3
+
+  # 重试基础等待秒数（实际等待 = 该值 × 当前重试次数，线性退避）
+  retry_delay_seconds: 15
+
+  # 单次 API 请求超时秒数（长视频上传+分析较慢，不建议低于 300）
+  request_timeout_seconds: 600
+
+  # 单次回复最大输出 token 数
+  max_output_tokens: 65536
+
+  # 生成温度（0-2）。越低越严谨稳定，分析类任务建议 0.2-0.6
+  temperature: 0.4
+
+analysis:
+  # 默认分析方法（提示词档案），对应 prompts/<名称>.md
+  # 内置档案：tutorial（教程整理，原项目默认行为）/ summary（内容摘要）
+  # 新建 prompts/我的方法.md 即可扩展自己的分析方法
+  # 提示词文件每次运行时实时读取——修改后立即生效，无需重启 skill 或 agent
+  profile: "tutorial"
+
+  # 提示词档案目录。留空 = 本 skill 目录下的 prompts/
+  prompts_dir: ""
+
+  # 强制证据要求：自动向提示词追加"所有结论必须标注时间戳 [MM:SS]、
+  # 关键画面标注 [screenshot_MM_SS.jpg]（自动提取截图）"的硬性规则。
+  # 自定义档案里已写明截图规则时不会重复追加。
+  require_evidence: true
+
+  # 长视频自动分段阈值（分钟）。超过则切段、顺序携带前文上下文处理
+  # 参考：1M context 模型约能容纳 55 分钟视频，40 留有提示词+输出余量
+  chunk_minutes: 40
+
+  # 固定间隔截图秒数（备用参数；当前默认按 Gemini 标注的关键帧按需提取）
+  keyframe_interval: 5
+
+video:
+  # Gemini 不支持的容器格式（如 .mkv / .ts）自动转换为 mp4 后再上传
+  auto_convert: true
+
+  # File API 不可用、降级为 inline base64 上传时的体积上限（MB）。
+  # 超过该值自动压缩（720p H.264）。base64 膨胀约 33%，代理常见限制 10MB → 默认 6
+  inline_max_mb: 6
+
+batch:
+  # 批量模式（--batch）默认并发处理数
+  workers: 2
