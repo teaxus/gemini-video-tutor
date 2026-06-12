@@ -4,7 +4,7 @@ description: >
   Analyze a video with Gemini and turn it into a structured Markdown document
   (default: a reproducible step-by-step tutorial with keyframe screenshots).
   用 Gemini 分析视频并产出结构化文档，默认把视频整理成带关键帧截图的可复现教程。
-  分析方法（提示词）可配置：换 prompts/<名称>.md 即可改成摘要、字幕、复盘等任意方法，改完即时生效。
+  分析方法（提示词）可配置：内置档案 / 临时文本 / 传入提示词文件路径，改完即时生效。
   整段视频直传 Gemini，长视频自动分段并顺序累积上下文，分段失败可 --resume 续传，支持批量并发与分段并行。
   支持多轮来回深度追问（ask.py）：视频上传一次，对话历史持久化，连续追问无需重新上传/重新分析。
   仅处理本地视频文件。在线 URL（YouTube、B站、抖音等）需先用 video-downloader skill 下载。
@@ -71,15 +71,24 @@ metadata:
 
 **认证方式 `auth`**：`auto`（默认）对官方 `googleapis.com` 用 `x-goog-api-key`，对其它代理用 `Authorization: Bearer`（OpenAI 协议下恒为 Bearer）。需要时可用 `--auth api-key|bearer` 或 config 强制。
 
-## 分析方法（提示词档案）
+## 分析方法（提示词选择规则）
 
-提示词不写死在代码里，而是放在 [prompts/](./prompts/) 下，每个 `.md` 是一种分析方法（"档案"）：
+提示词不写死在代码里。**agent 按以下顺序选择**：
 
-- 内置 `tutorial`（操作教程，默认）、`summary`（内容摘要）。
-- 档案格式见 [prompts/tutorial.md](./prompts/tutorial.md)：用 `# @system` / `# @prompt` / `# @continuation` 三段。`@prompt` 必填，其余可选。
-- **新增自己的方法**：复制一份改成 `prompts/我的方法.md`，再用 `--profile 我的方法` 或 config 选用。
-- **动态生效**：档案每次运行时实时读取，改完立即生效，无需重启 skill 或 agent。
-- `analysis.require_evidence: true` 时会自动为没写截图规则的档案追加"必须标注时间戳+截图"的硬性要求。
+1. **内置档案能覆盖** → 直接用：`--profile tutorial`（操作教程，默认）/ `--profile summary`（内容摘要）。
+2. **内置没覆盖，需要自定义分析/输出规则**：
+   - 规则简单（一行 100 字内说得清，且不要求特定输出格式如 md/json）→ 临时文本：`--prompt "只提取视频里所有命令行命令"`；
+   - 规则复杂 → 写成 `.md` 档案放在**调用方项目里**，路径传入：`--profile /路径/我的方法.md`（config `analysis.profile` 同样可填路径）。
+3. **用户明确要公开和共享该方法** → 把档案拷入本 skill 的 [prompts/](./prompts/)。
+
+`prompts/` 目录说明：
+- 除内置档案外整体被 .gitignore 忽略：放入私有档案不会被提交，可按短名调用，适合本机沉淀；
+- 维护者要把档案发布为内置时需 `git add -f prompts/<名称>.md`（普通 add 会被忽略规则拦住）。
+
+档案格式与生效：
+- 格式见 [prompts/tutorial.md](./prompts/tutorial.md)：`# @system` / `# @prompt` / `# @continuation` 三段，`@prompt` 必填。
+- 档案每次运行实时读取，**改完立即生效，无需重启 skill 或 agent**。
+- `analysis.require_evidence: true` 时自动为未写截图规则的档案追加"必须标注时间戳+截图"的硬性要求。
 
 ## 使用方法
 
@@ -91,6 +100,9 @@ python3 ./scripts/analyze.py "/path/to/video.mp4" -o tutorial.md
 
 # 换分析方法：内容摘要
 python3 ./scripts/analyze.py "video.mp4" --profile summary -o summary.md
+
+# 自定义提示词档案（放在调用方项目里，路径传入）
+python3 ./scripts/analyze.py "video.mp4" --profile /你的项目/我的方法.md -o out.md
 
 # 指定模型 / 分段时长
 python3 ./scripts/analyze.py "lecture.mp4" -m gemini-3-pro-preview --chunk-minutes 30 -o out.md

@@ -298,14 +298,25 @@ def available_profiles(prompts_dir: Path) -> list[str]:
 
 
 def load_profile(name: str, prompts_dir: Path) -> Profile:
-    """Load prompts/<name>.md, parsed into @system / @prompt / @continuation."""
-    path = prompts_dir / f"{name}.md"
-    if not path.exists():
-        avail = available_profiles(prompts_dir)
-        raise FileNotFoundError(
-            f"提示词档案 '{name}' 不存在: {path}\n"
-            f"可用档案: {', '.join(avail) if avail else '(无)'}\n"
-            f"新建 {prompts_dir}/{name}.md 即可扩展自定义分析方法。")
+    """Load a prompt profile by name (prompts/<name>.md) or by direct .md path.
+
+    A path (anything containing a separator or ending in .md) keeps private
+    prompts inside the calling project — never written into this skill's repo.
+    """
+    if name.endswith(".md") or "/" in name or os.sep in name:
+        path = Path(name).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"提示词文件不存在: {path}")
+        name = str(path)  # full path round-trips via the doc footer for --resume
+    else:
+        path = prompts_dir / f"{name}.md"
+        if not path.exists():
+            avail = available_profiles(prompts_dir)
+            raise FileNotFoundError(
+                f"提示词档案 '{name}' 不存在: {path}\n"
+                f"可用档案: {', '.join(avail) if avail else '(无)'}\n"
+                f"自定义提示词请放在你自己的项目里，用 --profile /路径/文件.md 传入，"
+                f"不要写入本 skill 的 prompts/ 目录。")
 
     text = path.read_text(encoding="utf-8")
     description = ""

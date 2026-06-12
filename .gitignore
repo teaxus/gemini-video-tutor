@@ -18,4 +18,7 @@ sessions/
 __pycache__/
 *.pyc
 
-# ── 注意：prompts/ 是 skill 的一部分，必须提交，不要忽略 ──
+
+# ── prompts/ 已整体私有化：仓库仅保留已发布的 tutorial.md / summary.md
+#    此后 prompts/ 下任何新增档案默认一律不入 git ──
+prompts/

@@ -103,16 +103,15 @@ python3 scripts/ask.py --list                                   # 所有会话
 
 ## 自定义分析方法
 
-提示词放在 [`prompts/`](prompts/) 下，每个 `.md` 是一种方法：
+按这个顺序选提示词：
 
-```
-prompts/
-  tutorial.md   # 操作教程（默认）
-  summary.md    # 内容摘要
-  我的方法.md    # ← 复制一份改成你自己的
-```
+1. **内置档案够用** → 直接用：`--profile tutorial`（教程，默认）/ `--profile summary`（摘要）；
+2. **需要自定义规则**：
+   - 简单规则（一行话说得清、不要求特定输出格式）→ 临时文本：`--prompt "只提取所有命令行命令"`；
+   - 复杂规则 → 写成 `.md` 档案放在**你自己的项目里**，路径传入：`--profile /路径/我的方法.md`（config `analysis.profile` 同样可填路径）；
+3. **想公开共享** → 把档案拷进本 skill 的 `prompts/`。该目录除内置档案外已被 .gitignore 忽略——放私有档案不会被提交，可按短名调用；维护者发布内置档案需 `git add -f`。
 
-格式（详见 `prompts/tutorial.md`）：
+档案格式（详见 `prompts/tutorial.md`）：
 
 ```markdown
 # @system
@@ -125,7 +124,7 @@ prompts/
 （长视频分段续写模板，可选；占位符 {chunk_index} {total_chunks} {start_time} {end_time} {previous_doc}）
 ```
 
-选用：`--profile 我的方法`，或 config 里 `analysis.profile: 我的方法`。**改完立即生效，无需重启。**
+**档案实时读取，改完立即生效，无需重启。**
 
 ---
 
